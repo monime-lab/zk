@@ -423,10 +423,8 @@ func (c *Conn) sendRequest(
 	return rq.recvChan, nil
 }
 
-func (c *Conn) sessionExpired(d time.Time) bool {
-	return d.Add(time.Duration(c.sessionTimeoutMs) * time.Millisecond).Before(time.Now())
-}
-
+// Issue read https://github.com/go-zookeeper/zk/issues/36
+// And fix from https://github.com/jpfourny/zk/commit/cd8998aad6c22c257ca8c4635e21e45ee88040df
 func (c *Conn) loop(ctx context.Context) {
 	var lastAuthTime time.Time
 	for {
