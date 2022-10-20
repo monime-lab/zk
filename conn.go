@@ -423,7 +423,12 @@ func (c *Conn) sendRequest(
 	return rq.recvChan, nil
 }
 
+func (c *Conn) sessionExpired(d time.Time) bool {
+	return d.Add(time.Duration(c.sessionTimeoutMs) * time.Millisecond).Before(time.Now())
+}
+
 func (c *Conn) loop(ctx context.Context) {
+	var lastAuthTime time.Time
 	for {
 		if err := c.connect(); err != nil {
 			// c.Close() was called
@@ -433,15 +438,26 @@ func (c *Conn) loop(ctx context.Context) {
 		err := c.authenticate()
 		switch {
 		case err == ErrSessionExpired:
-			c.logger.Printf("authentication failed: %s", err)
+			c.logger.Printf("authentication expired: %s", err)
 			c.invalidateWatches(err)
 		case err != nil && c.conn != nil:
 			c.logger.Printf("authentication failed: %s", err)
+			if err == io.EOF && time.Since(lastAuthTime).Milliseconds() > int64(c.sessionTimeoutMs) {
+				// Special case: Session lost from entire quorum, but all we see is EOF after auth request.
+				// Conservatively, we wait until session timeout elapses before assuming this worst-case scenario.
+				c.logger.Printf("quorum lost our session; resetting state")
+				err = ErrSessionExpired
+				c.invalidateWatches(ErrSessionExpired)
+				atomic.StoreInt64(&c.sessionID, int64(0))
+				c.passwd = emptyPassword
+				c.lastZxid = 0
+			}
 			c.conn.Close()
 		case err == nil:
 			if c.logInfo {
 				c.logger.Printf("authenticated: id=%d, timeout=%d", c.SessionID(), c.sessionTimeoutMs)
 			}
+			lastAuthTime = time.Now()
 			c.hostProvider.Connected()        // mark success
 			c.closeChan = make(chan struct{}) // channel to tell send loop stop
 
