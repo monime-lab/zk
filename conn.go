@@ -783,7 +783,8 @@ func (c *Conn) sendData(req *request) error {
 	case <-req.ctx.Done():
 		req.recvChan <- response{-1, req.ctx.Err()}
 		c.requestsLock.Unlock()
-		return req.ctx.Err()
+		// return nil as the error is not an internal one.
+		return nil
 	case <-c.closeChan:
 		req.recvChan <- response{-1, ErrConnectionClosed}
 		c.requestsLock.Unlock()
@@ -831,6 +832,8 @@ func (c *Conn) sendLoop() error {
 				return err
 			}
 		case <-c.closeChan:
+			return nil
+		case <-c.context.Done():
 			return nil
 		}
 	}
