@@ -336,7 +336,7 @@ func (c *Conn) Close() {
 		close(c.shouldQuit)
 
 		select {
-		case <-c.queueRequest(opClose, &closeRequest{}, &closeResponse{}, nil):
+		case <-c.queueRequest(c.context, opClose, &closeRequest{}, &closeResponse{}, nil):
 		case <-time.After(time.Second):
 		}
 	})
@@ -485,7 +485,7 @@ func (c *Conn) loop() {
 				defer c.conn.Close() // causes recv loop to EOF/exit
 				defer wg.Done()
 
-				if err := c.resendZkAuthFn(ctx, c); err != nil {
+				if err := c.resendZkAuthFn(c.context, c); err != nil {
 					c.logger.Printf("error in resending auth creds: %v", err)
 					return
 				}
@@ -679,7 +679,7 @@ func (c *Conn) sendSetWatches() {
 		// aren't failure modes where a blocking write to the channel of requests
 		// could hang indefinitely and cause this goroutine to leak...
 		for _, req := range reqs {
-			_, err := c.request(opSetWatches, req, res, nil)
+			_, err := c.request(c.context, opSetWatches, req, res, nil)
 			if err != nil {
 				c.logger.Printf("Failed to set previous watches: %v", err)
 				break
@@ -923,7 +923,7 @@ func (c *Conn) addWatcher(path string, watchType watchType) <-chan Event {
 	return ch
 }
 
-func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}, recvFunc func(*request, *responseHeader, error)) <-chan response {
+func (c *Conn) queueRequest(ctx context.Context, opcode int32, req interface{}, res interface{}, recvFunc func(*request, *responseHeader, error)) <-chan response {
 	rq := &request{
 		xid:        c.nextXid(),
 		opcode:     opcode,
@@ -938,6 +938,8 @@ func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}, recv
 		// always attempt to send close ops.
 		select {
 		case c.sendChan <- rq:
+		case <-ctx.Done():
+			rq.recvChan <- response{-1, ctx.Err()}
 		case <-time.After(c.connectTimeout * 2):
 			c.logger.Printf("gave up trying to send opClose to server")
 			rq.recvChan <- response{-1, ErrConnectionClosed}
@@ -946,11 +948,15 @@ func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}, recv
 		// otherwise avoid deadlocks for dumb clients who aren't aware that
 		// the ZK connection is closed yet.
 		select {
+		case <-ctx.Done():
+			rq.recvChan <- response{-1, ctx.Err()}
 		case <-c.shouldQuit:
 			rq.recvChan <- response{-1, ErrConnectionClosed}
 		case c.sendChan <- rq:
 			// check for a tie
 			select {
+			case <-ctx.Done():
+				rq.recvChan <- response{-1, ctx.Err()}
 			case <-c.shouldQuit:
 				// maybe the caller gets this, maybe not- we tried.
 				rq.recvChan <- response{-1, ErrConnectionClosed}
@@ -961,11 +967,13 @@ func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}, recv
 	return rq.recvChan
 }
 
-func (c *Conn) request(opcode int32, req interface{}, res interface{}, recvFunc func(*request, *responseHeader, error)) (int64, error) {
-	recv := c.queueRequest(opcode, req, res, recvFunc)
+func (c *Conn) request(ctx context.Context, opcode int32, req interface{}, res interface{}, recvFunc func(*request, *responseHeader, error)) (int64, error) {
+	recv := c.queueRequest(ctx, opcode, req, res, recvFunc)
 	select {
 	case r := <-recv:
 		return r.zxid, r.err
+	case <-ctx.Done():
+		return -1, ctx.Err()
 	case <-c.shouldQuit:
 		// queueRequest() can be racy, double-check for the race here and avoid
 		// a potential data-race. otherwise the client of this func may try to
@@ -977,8 +985,8 @@ func (c *Conn) request(opcode int32, req interface{}, res interface{}, recvFunc 
 }
 
 // AddAuth adds an authentication config to the connection.
-func (c *Conn) AddAuth(scheme string, auth []byte) error {
-	_, err := c.request(opSetAuth, &setAuthRequest{Type: 0, Scheme: scheme, Auth: auth}, &setAuthResponse{}, nil)
+func (c *Conn) AddAuth(ctx context.Context, scheme string, auth []byte) error {
+	_, err := c.request(ctx, opSetAuth, &setAuthRequest{Type: 0, Scheme: scheme, Auth: auth}, &setAuthResponse{}, nil)
 
 	if err != nil {
 		return err
@@ -1004,13 +1012,13 @@ func (c *Conn) AddAuth(scheme string, auth []byte) error {
 }
 
 // Children returns the children of a znode.
-func (c *Conn) Children(path string) ([]string, *Stat, error) {
+func (c *Conn) Children(ctx context.Context, path string) ([]string, *Stat, error) {
 	if err := validatePath(path, false); err != nil {
 		return nil, nil, err
 	}
 
 	res := &getChildren2Response{}
-	_, err := c.request(opGetChildren2, &getChildren2Request{Path: path, Watch: false}, res, nil)
+	_, err := c.request(ctx, opGetChildren2, &getChildren2Request{Path: path, Watch: false}, res, nil)
 	if err == ErrConnectionClosed {
 		return nil, nil, err
 	}
@@ -1018,14 +1026,14 @@ func (c *Conn) Children(path string) ([]string, *Stat, error) {
 }
 
 // ChildrenW returns the children of a znode and sets a watch.
-func (c *Conn) ChildrenW(path string) ([]string, *Stat, <-chan Event, error) {
+func (c *Conn) ChildrenW(ctx context.Context, path string) ([]string, *Stat, <-chan Event, error) {
 	if err := validatePath(path, false); err != nil {
 		return nil, nil, nil, err
 	}
 
 	var ech <-chan Event
 	res := &getChildren2Response{}
-	_, err := c.request(opGetChildren2, &getChildren2Request{Path: path, Watch: true}, res, func(req *request, res *responseHeader, err error) {
+	_, err := c.request(ctx, opGetChildren2, &getChildren2Request{Path: path, Watch: true}, res, func(req *request, res *responseHeader, err error) {
 		if err == nil {
 			ech = c.addWatcher(path, watchTypeChild)
 		}
@@ -1037,13 +1045,13 @@ func (c *Conn) ChildrenW(path string) ([]string, *Stat, <-chan Event, error) {
 }
 
 // Get gets the contents of a znode.
-func (c *Conn) Get(path string) ([]byte, *Stat, error) {
+func (c *Conn) Get(ctx context.Context, path string) ([]byte, *Stat, error) {
 	if err := validatePath(path, false); err != nil {
 		return nil, nil, err
 	}
 
 	res := &getDataResponse{}
-	_, err := c.request(opGetData, &getDataRequest{Path: path, Watch: false}, res, nil)
+	_, err := c.request(ctx, opGetData, &getDataRequest{Path: path, Watch: false}, res, nil)
 	if err == ErrConnectionClosed {
 		return nil, nil, err
 	}
@@ -1051,14 +1059,14 @@ func (c *Conn) Get(path string) ([]byte, *Stat, error) {
 }
 
 // GetW returns the contents of a znode and sets a watch
-func (c *Conn) GetW(path string) ([]byte, *Stat, <-chan Event, error) {
+func (c *Conn) GetW(ctx context.Context, path string) ([]byte, *Stat, <-chan Event, error) {
 	if err := validatePath(path, false); err != nil {
 		return nil, nil, nil, err
 	}
 
 	var ech <-chan Event
 	res := &getDataResponse{}
-	_, err := c.request(opGetData, &getDataRequest{Path: path, Watch: true}, res, func(req *request, res *responseHeader, err error) {
+	_, err := c.request(ctx, opGetData, &getDataRequest{Path: path, Watch: true}, res, func(req *request, res *responseHeader, err error) {
 		if err == nil {
 			ech = c.addWatcher(path, watchTypeData)
 		}
@@ -1070,13 +1078,13 @@ func (c *Conn) GetW(path string) ([]byte, *Stat, <-chan Event, error) {
 }
 
 // Set updates the contents of a znode.
-func (c *Conn) Set(path string, data []byte, version int32) (*Stat, error) {
+func (c *Conn) Set(ctx context.Context, path string, data []byte, version int32) (*Stat, error) {
 	if err := validatePath(path, false); err != nil {
 		return nil, err
 	}
 
 	res := &setDataResponse{}
-	_, err := c.request(opSetData, &SetDataRequest{path, data, version}, res, nil)
+	_, err := c.request(ctx, opSetData, &SetDataRequest{path, data, version}, res, nil)
 	if err == ErrConnectionClosed {
 		return nil, err
 	}
@@ -1087,13 +1095,13 @@ func (c *Conn) Set(path string, data []byte, version int32) (*Stat, error) {
 // The returned path is the new path assigned by the server, it may not be the
 // same as the input, for example when creating a sequence znode the returned path
 // will be the input path with a sequence number appended.
-func (c *Conn) Create(path string, data []byte, flags int32, acl []ACL) (string, error) {
+func (c *Conn) Create(ctx context.Context, path string, data []byte, flags int32, acl []ACL) (string, error) {
 	if err := validatePath(path, flags&FlagSequence == FlagSequence); err != nil {
 		return "", err
 	}
 
 	res := &createResponse{}
-	_, err := c.request(opCreate, &CreateRequest{path, data, acl, flags}, res, nil)
+	_, err := c.request(ctx, opCreate, &CreateRequest{path, data, acl, flags}, res, nil)
 	if err == ErrConnectionClosed {
 		return "", err
 	}
@@ -1101,7 +1109,7 @@ func (c *Conn) Create(path string, data []byte, flags int32, acl []ACL) (string,
 }
 
 // CreateContainer creates a container znode and returns the path.
-func (c *Conn) CreateContainer(path string, data []byte, flags int32, acl []ACL) (string, error) {
+func (c *Conn) CreateContainer(ctx context.Context, path string, data []byte, flags int32, acl []ACL) (string, error) {
 	if err := validatePath(path, flags&FlagSequence == FlagSequence); err != nil {
 		return "", err
 	}
@@ -1110,12 +1118,12 @@ func (c *Conn) CreateContainer(path string, data []byte, flags int32, acl []ACL)
 	}
 
 	res := &createResponse{}
-	_, err := c.request(opCreateContainer, &CreateContainerRequest{path, data, acl, flags}, res, nil)
+	_, err := c.request(ctx, opCreateContainer, &CreateContainerRequest{path, data, acl, flags}, res, nil)
 	return res.Path, err
 }
 
 // CreateTTL creates a TTL znode, which will be automatically deleted by server after the TTL.
-func (c *Conn) CreateTTL(path string, data []byte, flags int32, acl []ACL, ttl time.Duration) (string, error) {
+func (c *Conn) CreateTTL(ctx context.Context, path string, data []byte, flags int32, acl []ACL, ttl time.Duration) (string, error) {
 	if err := validatePath(path, flags&FlagSequence == FlagSequence); err != nil {
 		return "", err
 	}
@@ -1124,7 +1132,7 @@ func (c *Conn) CreateTTL(path string, data []byte, flags int32, acl []ACL, ttl t
 	}
 
 	res := &createResponse{}
-	_, err := c.request(opCreateTTL, &CreateTTLRequest{path, data, acl, flags, ttl.Milliseconds()}, res, nil)
+	_, err := c.request(ctx, opCreateTTL, &CreateTTLRequest{path, data, acl, flags, ttl.Milliseconds()}, res, nil)
 	return res.Path, err
 }
 
@@ -1132,7 +1140,7 @@ func (c *Conn) CreateTTL(path string, data []byte, flags int32, acl []ACL, ttl t
 // after it creates the node. On reconnect the session may still be valid so the
 // ephemeral node still exists. Therefore, on reconnect we need to check if a node
 // with a GUID generated on create exists.
-func (c *Conn) CreateProtectedEphemeralSequential(path string, data []byte, acl []ACL) (string, error) {
+func (c *Conn) CreateProtectedEphemeralSequential(ctx context.Context, path string, data []byte, acl []ACL) (string, error) {
 	if err := validatePath(path, true); err != nil {
 		return "", err
 	}
@@ -1151,12 +1159,12 @@ func (c *Conn) CreateProtectedEphemeralSequential(path string, data []byte, acl 
 
 	var newPath string
 	for i := 0; i < 3; i++ {
-		newPath, err = c.Create(protectedPath, data, FlagEphemeral|FlagSequence, acl)
+		newPath, err = c.Create(ctx, protectedPath, data, FlagEphemeral|FlagSequence, acl)
 		switch err {
 		case ErrSessionExpired:
 			// No need to search for the node since it can't exist. Just try again.
 		case ErrConnectionClosed:
-			children, _, err := c.Children(rootPath)
+			children, _, err := c.Children(ctx, rootPath)
 			if err != nil {
 				return "", err
 			}
@@ -1178,23 +1186,23 @@ func (c *Conn) CreateProtectedEphemeralSequential(path string, data []byte, acl 
 }
 
 // Delete deletes a znode.
-func (c *Conn) Delete(path string, version int32) error {
+func (c *Conn) Delete(ctx context.Context, path string, version int32) error {
 	if err := validatePath(path, false); err != nil {
 		return err
 	}
 
-	_, err := c.request(opDelete, &DeleteRequest{path, version}, &deleteResponse{}, nil)
+	_, err := c.request(ctx, opDelete, &DeleteRequest{path, version}, &deleteResponse{}, nil)
 	return err
 }
 
 // Exists tells the existence of a znode.
-func (c *Conn) Exists(path string) (bool, *Stat, error) {
+func (c *Conn) Exists(ctx context.Context, path string) (bool, *Stat, error) {
 	if err := validatePath(path, false); err != nil {
 		return false, nil, err
 	}
 
 	res := &existsResponse{}
-	_, err := c.request(opExists, &existsRequest{Path: path, Watch: false}, res, nil)
+	_, err := c.request(ctx, opExists, &existsRequest{Path: path, Watch: false}, res, nil)
 	if err == ErrConnectionClosed {
 		return false, nil, err
 	}
@@ -1207,14 +1215,14 @@ func (c *Conn) Exists(path string) (bool, *Stat, error) {
 }
 
 // ExistsW tells the existence of a znode and sets a watch.
-func (c *Conn) ExistsW(path string) (bool, *Stat, <-chan Event, error) {
+func (c *Conn) ExistsW(ctx context.Context, path string) (bool, *Stat, <-chan Event, error) {
 	if err := validatePath(path, false); err != nil {
 		return false, nil, nil, err
 	}
 
 	var ech <-chan Event
 	res := &existsResponse{}
-	_, err := c.request(opExists, &existsRequest{Path: path, Watch: true}, res, func(req *request, res *responseHeader, err error) {
+	_, err := c.request(ctx, opExists, &existsRequest{Path: path, Watch: true}, res, func(req *request, res *responseHeader, err error) {
 		if err == nil {
 			ech = c.addWatcher(path, watchTypeData)
 		} else if err == ErrNoNode {
@@ -1233,13 +1241,13 @@ func (c *Conn) ExistsW(path string) (bool, *Stat, <-chan Event, error) {
 }
 
 // GetACL gets the ACLs of a znode.
-func (c *Conn) GetACL(path string) ([]ACL, *Stat, error) {
+func (c *Conn) GetACL(ctx context.Context, path string) ([]ACL, *Stat, error) {
 	if err := validatePath(path, false); err != nil {
 		return nil, nil, err
 	}
 
 	res := &getAclResponse{}
-	_, err := c.request(opGetAcl, &getAclRequest{Path: path}, res, nil)
+	_, err := c.request(ctx, opGetAcl, &getAclRequest{Path: path}, res, nil)
 	if err == ErrConnectionClosed {
 		return nil, nil, err
 	}
@@ -1247,13 +1255,13 @@ func (c *Conn) GetACL(path string) ([]ACL, *Stat, error) {
 }
 
 // SetACL updates the ACLs of a znode.
-func (c *Conn) SetACL(path string, acl []ACL, version int32) (*Stat, error) {
+func (c *Conn) SetACL(ctx context.Context, path string, acl []ACL, version int32) (*Stat, error) {
 	if err := validatePath(path, false); err != nil {
 		return nil, err
 	}
 
 	res := &setAclResponse{}
-	_, err := c.request(opSetAcl, &setAclRequest{Path: path, Acl: acl, Version: version}, res, nil)
+	_, err := c.request(ctx, opSetAcl, &setAclRequest{Path: path, Acl: acl, Version: version}, res, nil)
 	if err == ErrConnectionClosed {
 		return nil, err
 	}
@@ -1263,13 +1271,13 @@ func (c *Conn) SetACL(path string, acl []ACL, version int32) (*Stat, error) {
 // Sync flushes the channel between process and the leader of a given znode,
 // you may need it if you want identical views of ZooKeeper data for 2 client instances.
 // Please refer to the "Consistency Guarantees" section of ZK document for more details.
-func (c *Conn) Sync(path string) (string, error) {
+func (c *Conn) Sync(ctx context.Context, path string) (string, error) {
 	if err := validatePath(path, false); err != nil {
 		return "", err
 	}
 
 	res := &syncResponse{}
-	_, err := c.request(opSync, &syncRequest{Path: path}, res, nil)
+	_, err := c.request(ctx, opSync, &syncRequest{Path: path}, res, nil)
 	if err == ErrConnectionClosed {
 		return "", err
 	}
@@ -1286,7 +1294,7 @@ type MultiResponse struct {
 // Multi executes multiple ZooKeeper operations or none of them. The provided
 // ops must be one of *CreateRequest, *DeleteRequest, *SetDataRequest, or
 // *CheckVersionRequest.
-func (c *Conn) Multi(ops ...interface{}) ([]MultiResponse, error) {
+func (c *Conn) Multi(ctx context.Context, ops ...interface{}) ([]MultiResponse, error) {
 	req := &multiRequest{
 		Ops:        make([]multiRequestOp, 0, len(ops)),
 		DoneHeader: multiHeader{Type: -1, Done: true, Err: -1},
@@ -1308,7 +1316,7 @@ func (c *Conn) Multi(ops ...interface{}) ([]MultiResponse, error) {
 		req.Ops = append(req.Ops, multiRequestOp{multiHeader{opCode, false, -1}, op})
 	}
 	res := &multiResponse{}
-	_, err := c.request(opMulti, req, res, nil)
+	_, err := c.request(ctx, opMulti, req, res, nil)
 	if err == ErrConnectionClosed {
 		return nil, err
 	}
@@ -1325,7 +1333,7 @@ func (c *Conn) Multi(ops ...interface{}) ([]MultiResponse, error) {
 // An optional version allows for conditional reconfigurations, -1 ignores the condition.
 //
 // Returns the new configuration znode stat.
-func (c *Conn) IncrementalReconfig(joining, leaving []string, version int64) (*Stat, error) {
+func (c *Conn) IncrementalReconfig(ctx context.Context, joining, leaving []string, version int64) (*Stat, error) {
 	// TODO: validate the shape of the member string to give early feedback.
 	request := &reconfigRequest{
 		JoiningServers: []byte(strings.Join(joining, ",")),
@@ -1333,7 +1341,7 @@ func (c *Conn) IncrementalReconfig(joining, leaving []string, version int64) (*S
 		CurConfigId:    version,
 	}
 
-	return c.internalReconfig(request)
+	return c.internalReconfig(ctx, request)
 }
 
 // Reconfig is the non-incremental update functionality for Zookeeper where the list provided
@@ -1342,18 +1350,18 @@ func (c *Conn) IncrementalReconfig(joining, leaving []string, version int64) (*S
 // An optional version allows for conditional reconfigurations, -1 ignores the condition.
 //
 // Returns the new configuration znode stat.
-func (c *Conn) Reconfig(members []string, version int64) (*Stat, error) {
+func (c *Conn) Reconfig(ctx context.Context, members []string, version int64) (*Stat, error) {
 	request := &reconfigRequest{
 		NewMembers:  []byte(strings.Join(members, ",")),
 		CurConfigId: version,
 	}
 
-	return c.internalReconfig(request)
+	return c.internalReconfig(ctx, request)
 }
 
-func (c *Conn) internalReconfig(request *reconfigRequest) (*Stat, error) {
+func (c *Conn) internalReconfig(ctx context.Context, request *reconfigRequest) (*Stat, error) {
 	response := &reconfigReponse{}
-	_, err := c.request(opReconfig, request, response, nil)
+	_, err := c.request(ctx, opReconfig, request, response, nil)
 	return &response.Stat, err
 }
 
@@ -1368,6 +1376,8 @@ func resendZkAuth(ctx context.Context, c *Conn) error {
 	shouldCancel := func() bool {
 		select {
 		case <-c.shouldQuit:
+			return true
+		case <-ctx.Done():
 			return true
 		case <-c.closeChan:
 			return true

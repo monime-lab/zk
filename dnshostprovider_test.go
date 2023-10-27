@@ -1,6 +1,7 @@
 package zk
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"testing"
@@ -33,15 +34,15 @@ func TestDNSHostProviderCreate(t *testing.T) {
 
 	path := "/gozk-test"
 
-	if err := zk.Delete(path, -1); err != nil && err != ErrNoNode {
+	if err := zk.Delete(context.Background(), path, -1); err != nil && err != ErrNoNode {
 		t.Fatalf("Delete returned error: %+v", err)
 	}
-	if p, err := zk.Create(path, []byte{1, 2, 3, 4}, 0, WorldACL(PermAll)); err != nil {
+	if p, err := zk.Create(context.Background(), path, []byte{1, 2, 3, 4}, 0, WorldACL(PermAll)); err != nil {
 		t.Fatalf("Create returned error: %+v", err)
 	} else if p != path {
 		t.Fatalf("Create returned different path '%s' != '%s'", p, path)
 	}
-	if data, stat, err := zk.Get(path); err != nil {
+	if data, stat, err := zk.Get(context.Background(), path); err != nil {
 		t.Fatalf("Get returned error: %+v", err)
 	} else if stat == nil {
 		t.Fatal("Get returned nil stat")
@@ -121,7 +122,7 @@ func TestDNSHostProviderReconnect(t *testing.T) {
 	path := "/gozk-test"
 
 	// Initial operation to force connection.
-	if err := zk.Delete(path, -1); err != nil && err != ErrNoNode {
+	if err := zk.Delete(context.Background(), path, -1); err != nil && err != ErrNoNode {
 		t.Fatalf("Delete returned error: %+v", err)
 	}
 
@@ -147,12 +148,12 @@ func TestDNSHostProviderReconnect(t *testing.T) {
 	ts.Servers[serverIndex].Srv.Start()
 
 	// Continue with the basic TestCreate tests.
-	if p, err := zk.Create(path, []byte{1, 2, 3, 4}, 0, WorldACL(PermAll)); err != nil {
+	if p, err := zk.Create(context.Background(), path, []byte{1, 2, 3, 4}, 0, WorldACL(PermAll)); err != nil {
 		t.Fatalf("Create returned error: %+v", err)
 	} else if p != path {
 		t.Fatalf("Create returned different path '%s' != '%s'", p, path)
 	}
-	if data, stat, err := zk.Get(path); err != nil {
+	if data, stat, err := zk.Get(context.Background(), path); err != nil {
 		t.Fatalf("Get returned error: %+v", err)
 	} else if stat == nil {
 		t.Fatal("Get returned nil stat")

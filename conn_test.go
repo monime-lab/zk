@@ -27,7 +27,7 @@ func TestRecurringReAuthHang(t *testing.T) {
 
 	waitForSession(ctx, evtC)
 	// Add auth.
-	conn.AddAuth("digest", []byte("test:test"))
+	conn.AddAuth(context.Background(), "digest", []byte("test:test"))
 
 	var reauthCloseOnce sync.Once
 	reauthSig := make(chan struct{}, 1)
@@ -67,7 +67,7 @@ func TestConcurrentReadAndClose(t *testing.T) {
 		okChan := make(chan struct{})
 		var setErr error
 		go func() {
-			_, setErr = conn.Create("/test-path", []byte("test data"), 0, WorldACL(PermAll))
+			_, setErr = conn.Create(context.Background(), "/test-path", []byte("test data"), 0, WorldACL(PermAll))
 			close(okChan)
 		}()
 

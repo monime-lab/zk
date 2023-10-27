@@ -1,6 +1,7 @@
 package zk
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -20,26 +21,26 @@ func TestLock(t *testing.T) {
 	acls := WorldACL(PermAll)
 
 	l := NewLock(zk, "/test", acls)
-	if err := l.Lock(); err != nil {
+	if err := l.Lock(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if err := l.Unlock(); err != nil {
+	if err := l.Unlock(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
 	val := make(chan int, 3)
 
-	if err := l.Lock(); err != nil {
+	if err := l.Lock(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
 	l2 := NewLock(zk, "/test", acls)
 	go func() {
-		if err := l2.Lock(); err != nil {
+		if err := l2.Lock(context.Background()); err != nil {
 			t.Fatal(err)
 		}
 		val <- 2
-		if err := l2.Unlock(); err != nil {
+		if err := l2.Unlock(context.Background()); err != nil {
 			t.Fatal(err)
 		}
 		val <- 3
@@ -47,7 +48,7 @@ func TestLock(t *testing.T) {
 	time.Sleep(time.Millisecond * 100)
 
 	val <- 1
-	if err := l.Unlock(); err != nil {
+	if err := l.Unlock(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if x := <-val; x != 1 {
@@ -78,18 +79,18 @@ func TestMultiLevelLock(t *testing.T) {
 
 	acls := WorldACL(PermAll)
 	path := "/test-multi-level"
-	if p, err := zk.Create(path, []byte{1, 2, 3, 4}, 0, WorldACL(PermAll)); err != nil {
+	if p, err := zk.Create(context.Background(), path, []byte{1, 2, 3, 4}, 0, WorldACL(PermAll)); err != nil {
 		t.Fatalf("Create returned error: %+v", err)
 	} else if p != path {
 		t.Fatalf("Create returned different path '%s' != '%s'", p, path)
 	}
 	l := NewLock(zk, "/test-multi-level/lock", acls)
-	defer zk.Delete("/test-multi-level", -1) // Clean up what we've created for this test
-	defer zk.Delete("/test-multi-level/lock", -1)
-	if err := l.Lock(); err != nil {
+	defer zk.Delete(context.Background(), "/test-multi-level", -1) // Clean up what we've created for this test
+	defer zk.Delete(context.Background(), "/test-multi-level/lock", -1)
+	if err := l.Lock(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if err := l.Unlock(); err != nil {
+	if err := l.Unlock(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 }
