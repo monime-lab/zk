@@ -77,6 +77,7 @@ type Conn struct {
 	passwd           []byte
 
 	dialer         Dialer
+	context        context.Context
 	hostProvider   HostProvider
 	serverMu       sync.Mutex // protects server
 	server         string     // remember the address/port of the current server
@@ -190,6 +191,7 @@ func Connect(servers []string, sessionTimeout time.Duration, options ...connOpti
 
 	ec := make(chan Event, eventChanSize)
 	conn := &Conn{
+		context:        context.Background(),
 		dialer:         net.DialTimeout,
 		hostProvider:   &DNSHostProvider{},
 		conn:           nil,
@@ -211,22 +213,39 @@ func Connect(servers []string, sessionTimeout time.Duration, options ...connOpti
 	for _, option := range options {
 		option(conn)
 	}
-
+	if conn.context == nil {
+		conn.context = context.Background()
+	}
 	if err := conn.hostProvider.Init(srvs); err != nil {
 		return nil, nil, err
 	}
 
 	conn.setTimeouts(int32(sessionTimeout / time.Millisecond))
-	// TODO: This context should be passed in by the caller to be the connection lifecycle context.
-	ctx := context.Background()
-
 	go func() {
-		conn.loop(ctx)
+		conn.loop()
 		conn.flushRequests(ErrClosing)
 		conn.invalidateWatches(ErrClosing)
 		close(conn.eventChan)
 	}()
+	go func() {
+		for {
+			select {
+			case <-conn.shouldQuit:
+				return
+			case <-conn.context.Done():
+				conn.Close()
+				return
+			}
+		}
+	}()
 	return conn, ec, nil
+}
+
+// WithContext returns a connection option specifying a non-default Context
+func WithContext(context context.Context) connOption {
+	return func(c *Conn) {
+		c.context = context
+	}
 }
 
 // WithDialer returns a connection option specifying a non-default Dialer.
@@ -425,7 +444,7 @@ func (c *Conn) sendRequest(
 
 // Issue read https://github.com/go-zookeeper/zk/issues/36
 // And fix from https://github.com/jpfourny/zk/commit/cd8998aad6c22c257ca8c4635e21e45ee88040df
-func (c *Conn) loop(ctx context.Context) {
+func (c *Conn) loop() {
 	var lastAuthTime time.Time
 	for {
 		if err := c.connect(); err != nil {
