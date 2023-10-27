@@ -6,13 +6,7 @@
   <component name="ChangeListManager">
     <list default="true" id="72499195-11ec-4016-a2c6-2c0f76c81f09" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/cluster_test.go" beforeDir="false" afterPath="$PROJECT_DIR$/cluster_test.go" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/conn.go" beforeDir="false" afterPath="$PROJECT_DIR$/conn.go" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/conn_test.go" beforeDir="false" afterPath="$PROJECT_DIR$/conn_test.go" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/dnshostprovider_test.go" beforeDir="false" afterPath="$PROJECT_DIR$/dnshostprovider_test.go" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lock.go" beforeDir="false" afterPath="$PROJECT_DIR$/lock.go" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lock_test.go" beforeDir="false" afterPath="$PROJECT_DIR$/lock_test.go" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/zk_test.go" beforeDir="false" afterPath="$PROJECT_DIR$/zk_test.go" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
