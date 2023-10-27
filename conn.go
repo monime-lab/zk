@@ -333,16 +333,16 @@ func WithMaxConnBufferSize(maxBufferSize int) connOption {
 func (c *Conn) Close() {
 	c.shouldQuitOnce.Do(func() {
 		close(c.shouldQuit)
-		var reqCtx context.Context
+		var closeCtx context.Context
 		select {
 		case <-c.context.Done():
 			// the parent Context is done, use a background Context for a graceful shutdown
-			reqCtx = context.Background()
+			closeCtx = context.Background()
 		default:
-			reqCtx = c.context
+			closeCtx = c.context
 		}
 		select {
-		case <-c.queueRequest(reqCtx, opClose, &closeRequest{}, &closeResponse{}, nil):
+		case <-c.queueRequest(closeCtx, opClose, &closeRequest{}, &closeResponse{}, nil):
 		case <-time.After(time.Second):
 		}
 	})
