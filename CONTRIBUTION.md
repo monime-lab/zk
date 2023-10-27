@@ -2,12 +2,14 @@
 
 ## **Did you find a bug?**
 
-* **Ensure the bug was not already reported** by searching on GitHub under [Issues](https://github.com/go-zookeeper/zk/issues).
+* **Ensure the bug was not already reported** by searching on GitHub
+  under [Issues](https://github.com/go-zookeeper/zk/issues).
 
 * If you're unable to find an open issue addressing the problem, open a new one.
-  * Be sure to include a title and clear description.
-  * Be sure to include the actual behavior vs the expected.
-  * As much relevant information as possible, a code sample or an executable test case demonstrating the expected vs actual behavior.
+    * Be sure to include a title and clear description.
+    * Be sure to include the actual behavior vs the expected.
+    * As much relevant information as possible, a code sample or an executable test case demonstrating the expected vs
+      actual behavior.
 
 ## Did you write a patch that fixes a bug
 
@@ -23,16 +25,19 @@ We are open to all Pull Requests, its best to accompany the requests with an iss
 
 * Requires at least one maintainer to approve the PR to merge to master.
 
-While the above must be satisfied prior to having your pull request reviewed, the reviewer(s) may ask you to complete additional design work, tests, or other changes before your pull request can be ultimately accepted.
+While the above must be satisfied prior to having your pull request reviewed, the reviewer(s) may ask you to complete
+additional design work, tests, or other changes before your pull request can be ultimately accepted.
 
 ## Versioned Releases
 
-Since this library is a core client for interacting with Zookeeper, we do [SemVer](https://semver.org/) releases to ensure predictable changes for users.
+Since this library is a core client for interacting with Zookeeper, we do [SemVer](https://semver.org/) releases to
+ensure predictable changes for users.
 
-Zookeeper itself maintains a compatibility check on the main codebase as well as maintaining backwards compatibility through all Major releases, this core library will try to uphold similar standards of releases.
+Zookeeper itself maintains a compatibility check on the main codebase as well as maintaining backwards compatibility
+through all Major releases, this core library will try to uphold similar standards of releases.
 
 * Code that is merged into master should be ready for release at any given time.
-  * This is to say, that code should not be merged into master if it is not complete and ready for production use.
+    * This is to say, that code should not be merged into master if it is not complete and ready for production use.
 
 * If a fix needs to be released ahead of normal operations, file an issue explaining the urgency and impact of the bug.
 
@@ -54,4 +59,5 @@ You can find information in editor support for Go tools here:
 
 ## Addition information
 
-* We have zero external dependencies, and would like to maintain this. Use of any external go library should be limited to tests.
+* We have zero external dependencies, and would like to maintain this. Use of any external go library should be limited
+  to tests.

@@ -96,7 +96,7 @@ func TestDeadlockInClose(t *testing.T) {
 	}
 
 	for i := 0; i < sendChanSize; i++ {
-		c.sendChan <- &request{}
+		c.sendChan <- &request{ctx: context.Background()}
 	}
 
 	okChan := make(chan struct{})

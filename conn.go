@@ -120,6 +120,7 @@ type Conn struct {
 type connOption func(c *Conn)
 
 type request struct {
+	ctx        context.Context
 	xid        int32
 	opcode     int32
 	pkt        interface{}
@@ -424,6 +425,7 @@ func (c *Conn) connect() error {
 }
 
 func (c *Conn) sendRequest(
+	ctx context.Context,
 	opcode int32,
 	req interface{},
 	res interface{},
@@ -433,6 +435,7 @@ func (c *Conn) sendRequest(
 	error,
 ) {
 	rq := &request{
+		ctx:        ctx,
 		xid:        c.nextXid(),
 		opcode:     opcode,
 		pkt:        req,
@@ -777,6 +780,10 @@ func (c *Conn) sendData(req *request) error {
 
 	c.requestsLock.Lock()
 	select {
+	case <-req.ctx.Done():
+		req.recvChan <- response{-1, req.ctx.Err()}
+		c.requestsLock.Unlock()
+		return req.ctx.Err()
 	case <-c.closeChan:
 		req.recvChan <- response{-1, ErrConnectionClosed}
 		c.requestsLock.Unlock()
@@ -931,6 +938,7 @@ func (c *Conn) addWatcher(path string, watchType watchType) <-chan Event {
 
 func (c *Conn) queueRequest(ctx context.Context, opcode int32, req interface{}, res interface{}, recvFunc func(*request, *responseHeader, error)) <-chan response {
 	rq := &request{
+		ctx:        ctx,
 		xid:        c.nextXid(),
 		opcode:     opcode,
 		pkt:        req,
@@ -1407,6 +1415,7 @@ func resendZkAuth(ctx context.Context, c *Conn) error {
 		// do not use the public API for auth since it depends on the send/recv loops
 		// that are waiting for this to return
 		resChan, err := c.sendRequest(
+			ctx,
 			opSetAuth,
 			&setAuthRequest{Type: 0,
 				Scheme: cred.scheme,
