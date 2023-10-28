@@ -116,8 +116,8 @@ type Conn struct {
 	buf []byte
 }
 
-// connOption represents a connection option.
-type connOption func(c *Conn)
+// ConnOption represents a connection option.
+type ConnOption func(c *Conn)
 
 type request struct {
 	ctx        context.Context
@@ -180,7 +180,7 @@ func ConnectWithDialer(servers []string, sessionTimeout time.Duration, dialer Di
 // the session timeout it's possible to reestablish a connection to a different
 // server and keep the same session. This is means any ephemeral nodes and
 // watches are maintained.
-func Connect(servers []string, sessionTimeout time.Duration, options ...connOption) (*Conn, <-chan Event, error) {
+func Connect(servers []string, sessionTimeout time.Duration, options ...ConnOption) (*Conn, <-chan Event, error) {
 	if len(servers) == 0 {
 		return nil, nil, errors.New("zk: server list must not be empty")
 	}
@@ -242,36 +242,43 @@ func Connect(servers []string, sessionTimeout time.Duration, options ...connOpti
 }
 
 // WithContext returns a connection option specifying a non-default Context
-func WithContext(context context.Context) connOption {
+func WithContext(context context.Context) ConnOption {
 	return func(c *Conn) {
 		c.context = context
 	}
 }
 
+// WithConnectTimeout returns a connection option specifying a non-default connectTimeout
+func WithConnectTimeout(timeout time.Duration) ConnOption {
+	return func(c *Conn) {
+		c.connectTimeout = timeout
+	}
+}
+
 // WithDialer returns a connection option specifying a non-default Dialer.
-func WithDialer(dialer Dialer) connOption {
+func WithDialer(dialer Dialer) ConnOption {
 	return func(c *Conn) {
 		c.dialer = dialer
 	}
 }
 
 // WithHostProvider returns a connection option specifying a non-default HostProvider.
-func WithHostProvider(hostProvider HostProvider) connOption {
+func WithHostProvider(hostProvider HostProvider) ConnOption {
 	return func(c *Conn) {
 		c.hostProvider = hostProvider
 	}
 }
 
 // WithLogger returns a connection option specifying a non-default Logger.
-func WithLogger(logger Logger) connOption {
+func WithLogger(logger Logger) ConnOption {
 	return func(c *Conn) {
 		c.logger = logger
 	}
 }
 
-// WithLogInfo returns a connection option specifying whether or not information messages
+// WithLogInfo returns a connection option specifying whether to log information messages
 // should be logged.
-func WithLogInfo(logInfo bool) connOption {
+func WithLogInfo(logInfo bool) ConnOption {
 	return func(c *Conn) {
 		c.logInfo = logInfo
 	}
@@ -283,7 +290,7 @@ type EventCallback func(Event)
 // WithEventCallback returns a connection option that specifies an event
 // callback.
 // The callback must not block - doing so would delay the ZK go routines.
-func WithEventCallback(cb EventCallback) connOption {
+func WithEventCallback(cb EventCallback) ConnOption {
 	return func(c *Conn) {
 		c.eventCallback = cb
 	}
@@ -313,7 +320,7 @@ func WithEventCallback(cb EventCallback) connOption {
 // the child names without an increased buffer size in the client, but they work
 // by inspecting the servers' transaction logs to enumerate children instead of
 // sending an online request to a server.
-func WithMaxBufferSize(maxBufferSize int) connOption {
+func WithMaxBufferSize(maxBufferSize int) ConnOption {
 	return func(c *Conn) {
 		c.maxBufferSize = maxBufferSize
 	}
@@ -323,7 +330,7 @@ func WithMaxBufferSize(maxBufferSize int) connOption {
 // packets to Zookeeper server. The standard Zookeeper client for java defaults
 // to a limit of 1mb. This option should be used for non-standard server setup
 // where znode is bigger than default 1mb.
-func WithMaxConnBufferSize(maxBufferSize int) connOption {
+func WithMaxConnBufferSize(maxBufferSize int) ConnOption {
 	return func(c *Conn) {
 		c.buf = make([]byte, maxBufferSize)
 	}
