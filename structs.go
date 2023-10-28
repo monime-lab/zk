@@ -22,6 +22,10 @@ func (defaultLogger) Printf(format string, a ...interface{}) {
 	log.Printf(format, a...)
 }
 
+func (defaultLogger) Errorf(format string, a ...interface{}) {
+	log.Printf(format, a...)
+}
+
 type ACL struct {
 	Perms  int32
 	Scheme string

@@ -60,6 +60,7 @@ type Dialer func(network, address string, timeout time.Duration) (net.Conn, erro
 // Logger is an interface that can be implemented to provide custom log output.
 type Logger interface {
 	Printf(string, ...interface{})
+	Errorf(string, ...interface{})
 }
 
 type authCreds struct {
@@ -427,7 +428,7 @@ func (c *Conn) connect() error {
 			return nil
 		}
 
-		c.logger.Printf("failed to connect to %s: %v", c.Server(), err)
+		c.logger.Errorf("failed to connect to %s: %v", c.Server(), err)
 	}
 }
 
@@ -471,10 +472,10 @@ func (c *Conn) loop() {
 		err := c.authenticate()
 		switch {
 		case err == ErrSessionExpired:
-			c.logger.Printf("authentication expired: %s", err)
+			c.logger.Errorf("authentication expired: %s", err)
 			c.invalidateWatches(err)
 		case err != nil && c.conn != nil:
-			c.logger.Printf("authentication failed: %s", err)
+			c.logger.Errorf("authentication failed: %s", err)
 			if err == io.EOF && time.Since(lastAuthTime).Milliseconds() > int64(c.sessionTimeoutMs) {
 				// Special case: Session lost from entire quorum, but all we see is EOF after auth request.
 				// Conservatively, we wait until session timeout elapses before assuming this worst-case scenario.
@@ -502,12 +503,12 @@ func (c *Conn) loop() {
 				defer wg.Done()
 
 				if err := c.resendZkAuthFn(c.context, c); err != nil {
-					c.logger.Printf("error in resending auth creds: %v", err)
+					c.logger.Errorf("error in resending auth creds: %v", err)
 					return
 				}
 
 				if err := c.sendLoop(); err != nil || c.logInfo {
-					c.logger.Printf("send loop terminated: %v", err)
+					c.logger.Errorf("send loop terminated: %v", err)
 				}
 			}()
 
@@ -523,7 +524,7 @@ func (c *Conn) loop() {
 					err = c.recvLoop(c.conn)
 				}
 				if err != io.EOF || c.logInfo {
-					c.logger.Printf("recv loop terminated: %v", err)
+					c.logger.Errorf("recv loop terminated: %v", err)
 				}
 				if err == nil {
 					panic("zk: recvLoop should never return nil error")
@@ -697,7 +698,7 @@ func (c *Conn) sendSetWatches() {
 		for _, req := range reqs {
 			_, err := c.request(c.context, opSetWatches, req, res, nil)
 			if err != nil {
-				c.logger.Printf("Failed to set previous watches: %v", err)
+				c.logger.Errorf("Failed to set previous watches: %v", err)
 				break
 			}
 		}
@@ -855,7 +856,7 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 	for {
 		// package length
 		if err := conn.SetReadDeadline(time.Now().Add(c.recvTimeout)); err != nil {
-			c.logger.Printf("failed to set connection deadline: %v", err)
+			c.logger.Errorf("failed to set connection deadline: %v", err)
 		}
 		_, err := io.ReadFull(conn, buf[:4])
 		if err != nil {
