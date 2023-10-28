@@ -59,8 +59,7 @@ type Dialer func(network, address string, timeout time.Duration) (net.Conn, erro
 
 // Logger is an interface that can be implemented to provide custom log output.
 type Logger interface {
-	Debugf(string, ...interface{})
-	Infof(string, ...interface{})
+	Printf(string, ...interface{})
 	Errorf(string, ...interface{})
 }
 
@@ -415,7 +414,6 @@ func (c *Conn) connect() error {
 		if err == nil {
 			c.conn = zkConn
 			c.setState(StateConnected)
-			c.logger.Infof("connected to %s", c.Server())
 			return nil
 		}
 
@@ -470,7 +468,7 @@ func (c *Conn) loop() {
 			if err == io.EOF && time.Since(lastAuthTime).Milliseconds() > int64(c.sessionTimeoutMs) {
 				// Special case: Session lost from entire quorum, but all we see is EOF after auth request.
 				// Conservatively, we wait until session timeout elapses before assuming this worst-case scenario.
-				c.logger.Debugf("quorum lost our session; resetting state")
+				c.logger.Printf("quorum lost our session; resetting state")
 				err = ErrSessionExpired
 				c.invalidateWatches(ErrSessionExpired)
 				atomic.StoreInt64(&c.sessionID, int64(0))
@@ -479,7 +477,7 @@ func (c *Conn) loop() {
 			}
 			c.conn.Close()
 		case err == nil:
-			c.logger.Debugf("authenticated: id=%d, timeout=%d", c.SessionID(), c.sessionTimeoutMs)
+			c.logger.Printf("authenticated: id=%d, timeout=%d", c.SessionID(), c.sessionTimeoutMs)
 			lastAuthTime = time.Now()
 			c.hostProvider.Connected()        // mark success
 			c.closeChan = make(chan struct{}) // channel to tell send loop stop
@@ -889,7 +887,7 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 		} else if res.Xid == -2 {
 			// Ping response. Ignore.
 		} else if res.Xid < 0 {
-			c.logger.Debugf("Xid < 0 (%d) but not ping or watcher event", res.Xid)
+			c.logger.Printf("Xid < 0 (%d) but not ping or watcher event", res.Xid)
 		} else {
 			if res.Zxid > 0 {
 				c.lastZxid = res.Zxid
@@ -903,7 +901,7 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 			c.requestsLock.Unlock()
 
 			if !ok {
-				c.logger.Debugf("Response for unknown request with xid %d", res.Xid)
+				c.logger.Printf("Response for unknown request with xid %d", res.Xid)
 			} else {
 				if res.Err != 0 {
 					err = res.Err.toError()
@@ -955,7 +953,7 @@ func (c *Conn) queueRequest(ctx context.Context, opcode int32, req interface{}, 
 		case <-ctx.Done():
 			rq.recvChan <- response{-1, ctx.Err()}
 		case <-time.After(c.connectTimeout * 2):
-			c.logger.Debugf("gave up trying to send opClose to server")
+			c.logger.Printf("gave up trying to send opClose to server")
 			rq.recvChan <- response{-1, ErrConnectionClosed}
 		}
 	default:
@@ -1403,7 +1401,7 @@ func resendZkAuth(ctx context.Context, c *Conn) error {
 	c.credsMu.Lock()
 	defer c.credsMu.Unlock()
 
-	c.logger.Debugf("re-submitting `%d` credentials after reconnect", len(c.creds))
+	c.logger.Printf("re-submitting `%d` credentials after reconnect", len(c.creds))
 
 	for _, cred := range c.creds {
 		// return early before attempting to send request.
@@ -1430,10 +1428,10 @@ func resendZkAuth(ctx context.Context, c *Conn) error {
 		select {
 		case res = <-resChan:
 		case <-c.closeChan:
-			c.logger.Debugf("recv closed, cancel re-submitting credentials")
+			c.logger.Printf("recv closed, cancel re-submitting credentials")
 			return nil
 		case <-c.shouldQuit:
-			c.logger.Debugf("should quit, cancel re-submitting credentials")
+			c.logger.Printf("should quit, cancel re-submitting credentials")
 			return nil
 		case <-ctx.Done():
 			return ctx.Err()
