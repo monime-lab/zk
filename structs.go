@@ -18,7 +18,11 @@ var (
 
 type defaultLogger struct{}
 
-func (defaultLogger) Printf(format string, a ...interface{}) {
+func (defaultLogger) Debugf(format string, a ...interface{}) {
+	log.Printf(format, a...)
+}
+
+func (defaultLogger) Infof(format string, a ...interface{}) {
 	log.Printf(format, a...)
 }
 

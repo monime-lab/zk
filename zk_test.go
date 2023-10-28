@@ -1155,13 +1155,13 @@ func startSlowProxy(t *testing.T, up, down Rate, upstream string, adj func(ln *L
 				go func() {
 					if _, err := io.Copy(upcn, cn); err != nil {
 						if !strings.Contains(err.Error(), "use of closed network connection") {
-							// log.Printf("Upstream write failed: %s", err.Error())
+							// log.Debugf("Upstream write failed: %s", err.Error())
 						}
 					}
 				}()
 				if _, err := io.Copy(cn, upcn); err != nil {
 					if !strings.Contains(err.Error(), "use of closed network connection") {
-						// log.Printf("Upstream read failed: %s", err.Error())
+						// log.Debugf("Upstream read failed: %s", err.Error())
 					}
 				}
 			}(cn)
@@ -1203,17 +1203,20 @@ type testLogger struct {
 	events []string
 }
 
-func (l *testLogger) Errorf(msgFormat string, args ...interface{}) {
-	l.Printf(msgFormat, args...)
-
-}
-
-func (l *testLogger) Printf(msgFormat string, args ...interface{}) {
+func (l *testLogger) Debugf(msgFormat string, args ...interface{}) {
 	msg := fmt.Sprintf(msgFormat, args...)
 	fmt.Println(msg)
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.events = append(l.events, msg)
+}
+
+func (l *testLogger) Errorf(msgFormat string, args ...interface{}) {
+	l.Debugf(msgFormat, args...)
+}
+
+func (l *testLogger) Infof(msgFormat string, args ...interface{}) {
+	l.Debugf(msgFormat, args...)
 }
 
 func (l *testLogger) Reset() []string {

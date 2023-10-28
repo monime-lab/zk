@@ -59,7 +59,8 @@ type Dialer func(network, address string, timeout time.Duration) (net.Conn, erro
 
 // Logger is an interface that can be implemented to provide custom log output.
 type Logger interface {
-	Printf(string, ...interface{})
+	Debugf(string, ...interface{})
+	Infof(string, ...interface{})
 	Errorf(string, ...interface{})
 }
 
@@ -277,14 +278,6 @@ func WithLogger(logger Logger) ConnOption {
 	}
 }
 
-// WithLogInfo returns a connection option specifying whether to log information messages
-// should be logged.
-func WithLogInfo(logInfo bool) ConnOption {
-	return func(c *Conn) {
-		c.logInfo = logInfo
-	}
-}
-
 // EventCallback is a function that is called when an Event occurs.
 type EventCallback func(Event)
 
@@ -422,9 +415,7 @@ func (c *Conn) connect() error {
 		if err == nil {
 			c.conn = zkConn
 			c.setState(StateConnected)
-			if c.logInfo {
-				c.logger.Printf("connected to %s", c.Server())
-			}
+			c.logger.Infof("connected to %s", c.Server())
 			return nil
 		}
 
@@ -479,7 +470,7 @@ func (c *Conn) loop() {
 			if err == io.EOF && time.Since(lastAuthTime).Milliseconds() > int64(c.sessionTimeoutMs) {
 				// Special case: Session lost from entire quorum, but all we see is EOF after auth request.
 				// Conservatively, we wait until session timeout elapses before assuming this worst-case scenario.
-				c.logger.Printf("quorum lost our session; resetting state")
+				c.logger.Debugf("quorum lost our session; resetting state")
 				err = ErrSessionExpired
 				c.invalidateWatches(ErrSessionExpired)
 				atomic.StoreInt64(&c.sessionID, int64(0))
@@ -488,9 +479,7 @@ func (c *Conn) loop() {
 			}
 			c.conn.Close()
 		case err == nil:
-			if c.logInfo {
-				c.logger.Printf("authenticated: id=%d, timeout=%d", c.SessionID(), c.sessionTimeoutMs)
-			}
+			c.logger.Debugf("authenticated: id=%d, timeout=%d", c.SessionID(), c.sessionTimeoutMs)
 			lastAuthTime = time.Now()
 			c.hostProvider.Connected()        // mark success
 			c.closeChan = make(chan struct{}) // channel to tell send loop stop
@@ -507,7 +496,7 @@ func (c *Conn) loop() {
 					return
 				}
 
-				if err := c.sendLoop(); err != nil || c.logInfo {
+				if err := c.sendLoop(); err != nil {
 					c.logger.Errorf("send loop terminated: %v", err)
 				}
 			}()
@@ -523,7 +512,7 @@ func (c *Conn) loop() {
 				} else {
 					err = c.recvLoop(c.conn)
 				}
-				if err != io.EOF || c.logInfo {
+				if err != io.EOF {
 					c.logger.Errorf("recv loop terminated: %v", err)
 				}
 				if err == nil {
@@ -900,7 +889,7 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 		} else if res.Xid == -2 {
 			// Ping response. Ignore.
 		} else if res.Xid < 0 {
-			c.logger.Printf("Xid < 0 (%d) but not ping or watcher event", res.Xid)
+			c.logger.Debugf("Xid < 0 (%d) but not ping or watcher event", res.Xid)
 		} else {
 			if res.Zxid > 0 {
 				c.lastZxid = res.Zxid
@@ -914,7 +903,7 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 			c.requestsLock.Unlock()
 
 			if !ok {
-				c.logger.Printf("Response for unknown request with xid %d", res.Xid)
+				c.logger.Debugf("Response for unknown request with xid %d", res.Xid)
 			} else {
 				if res.Err != 0 {
 					err = res.Err.toError()
@@ -966,7 +955,7 @@ func (c *Conn) queueRequest(ctx context.Context, opcode int32, req interface{}, 
 		case <-ctx.Done():
 			rq.recvChan <- response{-1, ctx.Err()}
 		case <-time.After(c.connectTimeout * 2):
-			c.logger.Printf("gave up trying to send opClose to server")
+			c.logger.Debugf("gave up trying to send opClose to server")
 			rq.recvChan <- response{-1, ErrConnectionClosed}
 		}
 	default:
@@ -1414,9 +1403,7 @@ func resendZkAuth(ctx context.Context, c *Conn) error {
 	c.credsMu.Lock()
 	defer c.credsMu.Unlock()
 
-	if c.logInfo {
-		c.logger.Printf("re-submitting `%d` credentials after reconnect", len(c.creds))
-	}
+	c.logger.Debugf("re-submitting `%d` credentials after reconnect", len(c.creds))
 
 	for _, cred := range c.creds {
 		// return early before attempting to send request.
@@ -1443,10 +1430,10 @@ func resendZkAuth(ctx context.Context, c *Conn) error {
 		select {
 		case res = <-resChan:
 		case <-c.closeChan:
-			c.logger.Printf("recv closed, cancel re-submitting credentials")
+			c.logger.Debugf("recv closed, cancel re-submitting credentials")
 			return nil
 		case <-c.shouldQuit:
-			c.logger.Printf("should quit, cancel re-submitting credentials")
+			c.logger.Debugf("should quit, cancel re-submitting credentials")
 			return nil
 		case <-ctx.Done():
 			return ctx.Err()
